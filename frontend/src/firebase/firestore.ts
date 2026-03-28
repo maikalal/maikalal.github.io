@@ -28,8 +28,8 @@ const SETTINGS_COLLECTION = 'settings';
 
 // User Operations
 export async function createUser(userData: Omit<User, 'id' | 'createdAt'>): Promise<User> {
-  // Use firebaseUid as document ID for proper Firestore rules
-  const docId = userData.firebaseUid || userData.telegramId.toString();
+  // Always use telegramId as document ID for consistent lookups across sessions
+  const docId = userData.telegramId.toString();
   const userRef = doc(collection(db, USERS_COLLECTION), docId);
   const now = Timestamp.now();
   
@@ -71,11 +71,18 @@ export async function getUserByTelegramId(telegramId: number): Promise<User | nu
 }
 
 export async function getUserByFirebaseUid(firebaseUid: string): Promise<User | null> {
-  const userRef = doc(db, USERS_COLLECTION, firebaseUid);
+  // First lookup telegramId from auth_mappings
+  const mappingRef = doc(db, AUTH_MAPPINGS_COLLECTION, firebaseUid);
+  const mappingSnap = await getDoc(mappingRef);
+
+  if (!mappingSnap.exists()) return null;
+
+  const telegramId = String(mappingSnap.data().telegramId);
+  const userRef = doc(db, USERS_COLLECTION, telegramId);
   const userSnap = await getDoc(userRef);
-  
+
   if (!userSnap.exists()) return null;
-  
+
   const data = userSnap.data();
   return {
     ...data,
@@ -87,6 +94,20 @@ export async function getUserByFirebaseUid(firebaseUid: string): Promise<User | 
 export async function updateUserRole(telegramId: number, role: 'user' | 'admin'): Promise<void> {
   const userRef = doc(db, USERS_COLLECTION, telegramId.toString());
   await updateDoc(userRef, { role });
+}
+
+export async function updateUserFirebaseUid(telegramId: number, firebaseUid: string): Promise<void> {
+  const userRef = doc(db, USERS_COLLECTION, telegramId.toString());
+  await updateDoc(userRef, { firebaseUid });
+}
+
+// Auth Mapping Operations
+// Maps firebaseUid to telegramId for Firestore security rules
+const AUTH_MAPPINGS_COLLECTION = 'auth_mappings';
+
+export async function createAuthMapping(firebaseUid: string, telegramId: number): Promise<void> {
+  const mappingRef = doc(db, AUTH_MAPPINGS_COLLECTION, firebaseUid);
+  await setDoc(mappingRef, { telegramId, updatedAt: Timestamp.now() }, { merge: true });
 }
 
 // Unlockables Operations
@@ -375,14 +396,35 @@ export async function getSettings(): Promise<AppSettings> {
     return {
       id: 'app',
       adWatchThreshold: 5,
+      primaryAdType: 'direct_link',
+      monetagPreloadEnabled: true,
+      monetagTimeout: 5,
+      monetagInApp: {
+        enabled: false,
+        frequency: 3,
+        capping: 0.5,
+        interval: 60,
+        timeout: 10,
+        everyPage: false,
+      },
       updatedAt: new Date(),
     };
   }
   
+  const data = snapshot.data();
+  
+  // Backward compatibility: migrate adsterraUrl to directLinkUrl
+  const directLinkUrl = data.directLinkUrl || data.adsterraUrl || undefined;
+  
+  // Backward compatibility: default primaryAdType to 'direct_link' if not set
+  const primaryAdType = data.primaryAdType || 'direct_link';
+  
   return {
-    ...snapshot.data(),
+    ...data,
     id: snapshot.id,
-    updatedAt: snapshot.data().updatedAt?.toDate() || new Date(),
+    primaryAdType,
+    directLinkUrl,
+    updatedAt: data.updatedAt?.toDate() || new Date(),
   } as AppSettings;
 }
 
@@ -443,15 +485,34 @@ export function subscribeToSettings(callback: (settings: AppSettings) => void): 
       callback({
         id: 'app',
         adWatchThreshold: 5,
+        primaryAdType: 'direct_link',
+        monetagPreloadEnabled: true,
+        monetagTimeout: 5,
+        monetagInApp: {
+          enabled: false,
+          frequency: 3,
+          capping: 0.5,
+          interval: 60,
+          timeout: 10,
+          everyPage: false,
+        },
         updatedAt: new Date(),
       });
       return;
     }
     
+    const data = snapshot.data();
+    
+    // Backward compatibility: migrate adsterraUrl to directLinkUrl
+    const directLinkUrl = data.directLinkUrl || data.adsterraUrl || undefined;
+    const primaryAdType = data.primaryAdType || 'direct_link';
+    
     callback({
-      ...snapshot.data(),
+      ...data,
       id: snapshot.id,
-      updatedAt: snapshot.data().updatedAt?.toDate() || new Date(),
+      primaryAdType,
+      directLinkUrl,
+      updatedAt: data.updatedAt?.toDate() || new Date(),
     } as AppSettings);
   });
 }

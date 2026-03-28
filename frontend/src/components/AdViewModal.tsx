@@ -1,7 +1,12 @@
-import { useState, useEffect, useRef } from 'react';
-import type { Unlockable } from '@/types';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import type { Unlockable, PrimaryAdType } from '@/types';
 import { useApp } from '@/context/AppContext';
 import { XMarkIcon, CheckIcon, TvIcon, ExclamationTriangleIcon, CheckCircleIcon } from './Icons';
+import {
+  showRewardedInterstitial,
+  showRewardedPopup,
+  generateYmid,
+} from '@/services/monetag';
 
 interface AdViewModalProps {
   unlockable: Unlockable | null;
@@ -10,38 +15,48 @@ interface AdViewModalProps {
   onComplete: () => void;
 }
 
-// Adsterra smartlink URL from environment variable (fallback)
-const ENV_ADSTERRA_URL = import.meta.env.VITE_ADSTERRA_URL || '';
+type AdState = 'idle' | 'loading' | 'watching' | 'completed' | 'error';
 
 export default function AdViewModal({ unlockable, isOpen, onClose, onComplete }: AdViewModalProps) {
   const { settings } = useApp();
   const threshold = settings?.adWatchThreshold || 5;
   const gracePeriod = settings?.adDetectionGracePeriod || 10;
   const hideTimerUI = settings?.hideTimerUI || false;
-  // Use settings URL if available, otherwise fall back to env var
-  const adsterraUrl = settings?.adsterraUrl || ENV_ADSTERRA_URL;
 
+  // Primary ad configuration
+  const primaryAdType: PrimaryAdType = settings?.primaryAdType || 'direct_link';
+  const directLinkUrl = settings?.directLinkUrl || settings?.adsterraUrl;
+
+  // Monetag config
+  const monetagYmid = settings?.monetagYmid;
+  const monetagRequestVar = settings?.monetagRequestVar || 'unlock_ad';
+  const monetagPreloadEnabled = settings?.monetagPreloadEnabled ?? true;
+  const monetagTimeout = settings?.monetagTimeout || 5;
+
+  // State
+  const [adState, setAdState] = useState<AdState>('idle');
   const [timeElapsed, setTimeElapsed] = useState(0);
-  const [adWatched, setAdWatched] = useState(false);
   const [adWindow, setAdWindow] = useState<Window | null>(null);
-  const [isWatching, setIsWatching] = useState(false);
   const [showFallbackClaim, setShowFallbackClaim] = useState(false);
   const [windowClosedEarly, setWindowClosedEarly] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const adOpenTimeRef = useRef<number | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const checkClosedRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const ymidRef = useRef<string>('');
 
   // Reset state when modal opens/closes
   useEffect(() => {
     if (!isOpen) {
       setTimeElapsed(0);
-      setAdWatched(false);
+      setAdState('idle');
       setAdWindow(null);
-      setIsWatching(false);
       setShowFallbackClaim(false);
       setWindowClosedEarly(false);
+      setErrorMessage(null);
       adOpenTimeRef.current = null;
+      ymidRef.current = '';
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
@@ -50,27 +65,26 @@ export default function AdViewModal({ unlockable, isOpen, onClose, onComplete }:
         clearInterval(checkClosedRef.current);
         checkClosedRef.current = null;
       }
+    } else {
+      // Generate ymid for this ad session
+      ymidRef.current = monetagYmid || generateYmid('ad');
     }
-  }, [isOpen]);
+  }, [isOpen, monetagYmid]);
 
-  // Main timer and window close detection logic
+  // Timer and window close detection for direct_link type
   useEffect(() => {
-    if (!adWindow) return;
+    if (primaryAdType !== 'direct_link' || !adWindow) return;
 
-    // Record when ad window was opened
     adOpenTimeRef.current = Date.now();
-    setIsWatching(true);
+    setAdState('watching');
     setWindowClosedEarly(false);
 
-    // Start elapsed time timer
     timerRef.current = setInterval(() => {
       setTimeElapsed(prev => prev + 1);
     }, 1000);
 
-    // Check if ad window is closed
     checkClosedRef.current = setInterval(() => {
       try {
-        // Try to access .closed property - may throw for cross-origin
         const isClosed = adWindow.closed;
 
         if (isClosed) {
@@ -78,14 +92,11 @@ export default function AdViewModal({ unlockable, isOpen, onClose, onComplete }:
             ? Math.floor((Date.now() - adOpenTimeRef.current) / 1000)
             : 0;
 
-          // Only count as watched if open for threshold seconds
           if (openDuration >= threshold) {
-            setAdWatched(true);
-            setIsWatching(false);
+            setAdState('completed');
           } else {
-            // Ad closed too early
             setWindowClosedEarly(true);
-            setIsWatching(false);
+            setAdState('idle');
             setAdWindow(null);
             setTimeElapsed(0);
           }
@@ -96,8 +107,7 @@ export default function AdViewModal({ unlockable, isOpen, onClose, onComplete }:
           }
         }
       } catch {
-        // Cross-origin restriction - can't detect window close
-        // Timer continues, fallback will appear after threshold + grace period
+        // Cross-origin restriction
       }
     }, 500);
 
@@ -111,43 +121,189 @@ export default function AdViewModal({ unlockable, isOpen, onClose, onComplete }:
         timerRef.current = null;
       }
     };
-  }, [adWindow, threshold]);
+  }, [adWindow, threshold, primaryAdType]);
 
-  // Show fallback claim option after threshold + grace period
+  // Show fallback claim option after threshold + grace period (for direct_link)
   useEffect(() => {
-    if (isWatching && timeElapsed >= threshold + gracePeriod && !adWatched) {
+    if (primaryAdType === 'direct_link' && adState === 'watching' && timeElapsed >= threshold + gracePeriod) {
       setShowFallbackClaim(true);
     }
-  }, [timeElapsed, isWatching, threshold, gracePeriod, adWatched]);
+  }, [timeElapsed, adState, threshold, gracePeriod, primaryAdType]);
 
-  const handleAdClick = () => {
-    if (adsterraUrl) {
-      // Open Adsterra smartlink in new window
-      // Note: Not using noopener to allow .closed detection (may still fail for cross-origin)
-      const win = window.open(adsterraUrl, '_blank');
-      if (win) {
-        setAdWindow(win);
+  // Handle ad based on type
+  const handleAdClick = useCallback(async () => {
+    setErrorMessage(null);
+
+    if (primaryAdType === 'direct_link') {
+      // Direct link: open in new window
+      if (directLinkUrl) {
+        const win = window.open(directLinkUrl, '_blank');
+        if (win) {
+          setAdWindow(win);
+        } else {
+          setErrorMessage('Unable to open ad window. Please check popup blocker.');
+          setAdState('error');
+        }
+      } else {
+        setErrorMessage('No ad URL configured.');
+        setAdState('error');
+      }
+    } else if (primaryAdType === 'monetag_rewarded_interstitial') {
+      // Monetag Rewarded Interstitial
+      setAdState('loading');
+
+      const result = await showRewardedInterstitial({
+        ymid: ymidRef.current,
+        requestVar: monetagRequestVar,
+        preload: monetagPreloadEnabled,
+        timeout: monetagTimeout,
+        catchIfNoFeed: true,
+      });
+
+      if (result.success) {
+        setAdState('completed');
+      } else {
+        setErrorMessage('Ad not available. Please try again.');
+        setAdState('error');
+      }
+    } else if (primaryAdType === 'monetag_rewarded_popup') {
+      // Monetag Rewarded Popup
+      setAdState('loading');
+
+      const result = await showRewardedPopup({
+        ymid: ymidRef.current,
+        requestVar: monetagRequestVar,
+      });
+
+      if (result.success) {
+        // Popup resolves immediately - consider it completed
+        setAdState('completed');
+      } else {
+        setErrorMessage('Unable to open popup. Please check popup blocker.');
+        setAdState('error');
       }
     }
-  };
+  }, [primaryAdType, directLinkUrl, monetagRequestVar, monetagPreloadEnabled, monetagTimeout]);
 
   const handleComplete = () => {
-    if (adWatched) {
+    if (adState === 'completed') {
       onComplete();
       onClose();
     }
   };
 
   const handleFallbackClaim = () => {
-    setAdWatched(true);
-    setIsWatching(false);
+    setAdState('completed');
     setShowFallbackClaim(false);
+  };
+
+  const handleRetry = () => {
+    setAdState('idle');
+    setWindowClosedEarly(false);
+    setErrorMessage(null);
+    setTimeElapsed(0);
   };
 
   const timeLeft = Math.max(0, threshold - timeElapsed);
   const progressValue = Math.min(timeElapsed, threshold);
 
+  // Determine if ad was watched (completed state)
+  const adWatched = adState === 'completed';
+  const isLoading = adState === 'loading';
+  const isWatching = adState === 'watching';
+  const hasError = adState === 'error';
+
   if (!isOpen || !unlockable) return null;
+
+  // Render ad button based on state
+  const renderAdButton = () => {
+    if (adWatched) {
+      return (
+        <div className="badge badge-success gap-1">
+          <CheckIcon className="w-4 h-4" />
+          Ad Viewed
+        </div>
+      );
+    }
+
+    if (hasError) {
+      return (
+        <button onClick={handleRetry} className="btn btn-primary">
+          Try Again
+        </button>
+      );
+    }
+
+    if (windowClosedEarly && !hideTimerUI && primaryAdType === 'direct_link') {
+      return (
+        <button onClick={handleAdClick} className="btn btn-primary">
+          Try Again
+        </button>
+      );
+    }
+
+    if (isLoading) {
+      return (
+        <div className="badge badge-primary gap-1">
+          <span className="loading loading-spinner loading-xs"></span>
+          Loading ad...
+        </div>
+      );
+    }
+
+    if (isWatching) {
+      if (hideTimerUI || primaryAdType !== 'direct_link') {
+        return (
+          <div className="badge badge-primary gap-1">
+            <span className="loading loading-spinner loading-xs"></span>
+            Please wait...
+          </div>
+        );
+      }
+      return (
+        <div className="flex flex-col items-center gap-2">
+          <div className="badge badge-primary gap-1">
+            <span className="loading loading-spinner loading-xs"></span>
+            {timeLeft}s remaining
+          </div>
+          <progress className="progress progress-primary w-32" value={progressValue} max={threshold}></progress>
+        </div>
+      );
+    }
+
+    return (
+      <button onClick={handleAdClick} className="btn btn-primary">
+        View Ad
+      </button>
+    );
+  };
+
+  // Get status message based on state and type
+  const getStatusMessage = () => {
+    if (adWatched) {
+      return 'Ad viewed successfully!';
+    }
+    if (hasError) {
+      return errorMessage || 'Something went wrong. Please try again.';
+    }
+    if (hideTimerUI) {
+      if (isLoading || isWatching) return 'Please wait...';
+      return 'Click below to view the ad';
+    }
+    if (windowClosedEarly && primaryAdType === 'direct_link') {
+      return 'Ad window closed too early. Try again!';
+    }
+    if (isWatching) {
+      if (primaryAdType === 'direct_link') {
+        return `Keep the ad window open for ${timeLeft} more seconds...`;
+      }
+      return 'Please wait while the ad plays...';
+    }
+    if (isLoading) {
+      return 'Loading ad...';
+    }
+    return 'Click below to view the ad';
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -176,59 +332,14 @@ export default function AdViewModal({ unlockable, isOpen, onClose, onComplete }:
               <div className="text-4xl mb-4 text-primary"><TvIcon className="w-10 h-10" /></div>
               <p className="font-semibold mb-2">Sponsored Content</p>
               <p className="text-sm text-base-content/60 mb-4">
-                {adWatched
-                  ? 'Ad viewed successfully!'
-                  : hideTimerUI
-                    ? isWatching
-                      ? 'Please wait...'
-                      : 'Click below to view the ad'
-                    : windowClosedEarly
-                      ? 'Ad window closed too early. Try again!'
-                      : isWatching
-                        ? `Keep the ad window open for ${timeLeft} more seconds...`
-                        : 'Click below to view the ad'
-                }
+                {getStatusMessage()}
               </p>
-              {adWatched ? (
-                <div className="badge badge-success gap-1">
-                  <CheckIcon className="w-4 h-4" />
-                  Ad Viewed
-                </div>
-              ) : windowClosedEarly && !hideTimerUI ? (
-                <button
-                  onClick={handleAdClick}
-                  className="btn btn-primary"
-                >
-                  Try Again
-                </button>
-              ) : isWatching ? (
-                hideTimerUI ? (
-                  <div className="badge badge-primary gap-1">
-                    <span className="loading loading-spinner loading-xs"></span>
-                    Please wait...
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center gap-2">
-                    <div className="badge badge-primary gap-1">
-                      <span className="loading loading-spinner loading-xs"></span>
-                      {timeLeft}s remaining
-                    </div>
-                    <progress className="progress progress-primary w-32" value={progressValue} max={threshold}></progress>
-                  </div>
-                )
-              ) : (
-                <button
-                  onClick={handleAdClick}
-                  className="btn btn-primary"
-                >
-                  View Ad
-                </button>
-              )}
+              {renderAdButton()}
             </div>
           </div>
 
-          {/* Fallback claim option */}
-          {showFallbackClaim && !adWatched && (
+          {/* Fallback claim option - only for direct_link type */}
+          {primaryAdType === 'direct_link' && showFallbackClaim && !adWatched && (
             <div className="mt-4 p-3 bg-base-200 rounded-lg border border-base-300">
               <p className="text-sm text-center text-base-content/70 mb-2">
                 Closed the ad window?
@@ -250,19 +361,22 @@ export default function AdViewModal({ unlockable, isOpen, onClose, onComplete }:
               </p>
             ) : hideTimerUI ? (
               <p className="text-sm text-base-content/60">
-                {isWatching ? 'Please wait while the ad loads...' : 'View the ad to earn progress'}
+                {isWatching || isLoading ? 'Please wait while the ad loads...' : 'View the ad to earn progress'}
               </p>
-            ) : windowClosedEarly ? (
+            ) : windowClosedEarly && primaryAdType === 'direct_link' ? (
               <p className="text-sm text-warning flex items-center gap-1">
                 <ExclamationTriangleIcon className="w-4 h-4" /> Ad was closed too early. Please watch for the full duration.
               </p>
-            ) : isWatching ? (
+            ) : isWatching && primaryAdType === 'direct_link' ? (
               <p className="text-sm text-base-content/60">
                 Do not close the ad window until the timer completes
               </p>
             ) : (
               <p className="text-sm text-base-content/60">
-                Watch the ad for <span className="font-bold text-primary">{threshold} seconds</span> to earn progress
+                {primaryAdType === 'direct_link'
+                  ? <>Watch the ad for <span className="font-bold text-primary">{threshold} seconds</span> to earn progress</>
+                  : 'Watch the ad to earn progress'
+                }
               </p>
             )}
           </div>

@@ -1,13 +1,13 @@
 # Maikalal - Telegram Mini App
 
-A Telegram Mini App where users watch Adsterra ads to unlock pictures/links. Built with React, TypeScript, DaisyUI, Firebase, and Cloudflare R2.
+A Telegram Mini App where users watch ads to unlock pictures/links. Built with React, TypeScript, DaisyUI, Firebase, Cloudflare R2, and Monetag SDK.
 
 ## Features
 
 - **Browse Unlockables**: View all available content with thumbnails
 - **Search**: Find unlockables by title or description
 - **Favorites**: Save favorite items for quick access
-- **Ad Watching**: Watch Adsterra ads to progress toward unlocking content
+- **Ad Watching**: Watch ads to progress toward unlocking content
 - **Content Unlocking**: Unlock pictures or links after watching required ads
 - **Admin Panel**: Full management dashboard for admins
 - **Telegram Auth**: Seamless authentication via Telegram Mini App
@@ -19,7 +19,7 @@ A Telegram Mini App where users watch Adsterra ads to unlock pictures/links. Bui
 - **Backend**: Firebase (Firestore, Auth)
 - **Storage**: Cloudflare R2 (via r2-worker)
 - **Auth**: Telegram Mini App authentication
-- **Ads**: Adsterra integration
+- **Ads**: Monetag SDK (Rewarded Interstitial, Rewarded Popup, In-App Interstitial, Direct Links)
 
 ## Setup
 
@@ -57,9 +57,6 @@ VITE_FIREBASE_APP_ID=your_app_id
 # R2 Worker Configuration
 VITE_R2_WORKER_URL=https://your-worker.your-subdomain.workers.dev
 VITE_UPLOAD_TOKEN=your-secret-token
-
-# Adsterra (optional, can be set in admin settings)
-VITE_ADSTERRA_URL=https://example.com/ad-link
 ```
 
 ### 5. Configure Firestore Rules
@@ -206,9 +203,29 @@ Admins can access the Admin panel (`/admin`) to:
 | Setting                   | Description                                  |
 | ------------------------- | -------------------------------------------- |
 | Ad Watch Threshold        | Seconds required for ad to count (1-60)      |
-| Adsterra URL              | Smartlink URL for ad viewing                 |
 | Ad Detection Grace Period | Seconds before showing fallback claim option |
 | Hide Timer UI             | Hide all timer-related UI from users         |
+| **Primary Ad Type**      | Choose the main ad format                    |
+| Direct Link URL           | URL to open for direct link ad type          |
+| **Monetag SDK Config**   |                                             |
+| Zone ID                   | Monetag zone ID (required for SDK ads)       |
+| ymid                      | User/event tracking ID for postbacks         |
+| requestVar                | Placement tracking for analytics             |
+| Preload Ads               | Preload ads for faster display               |
+| Ad Load Timeout           | Max seconds to wait for ad load              |
+| **In-App Interstitial**   | Background ads (runs alongside primary)      |
+| Enable                    | Toggle automatic background ads              |
+| Frequency                 | Max ads per session (1-10)                   |
+| Capping                   | Session duration in hours                    |
+| Interval                  | Seconds between ads                          |
+| Initial Delay             | Delay before first ad                        |
+| Reset on Page Nav         | Reset session on page navigation             |
+
+### Primary Ad Types
+
+1. **Direct Link URL**: Opens any ad network URL in a new window (Adsterra, Monetag direct links, etc.)
+2. **Monetag Rewarded Interstitial**: Full-screen SDK ad that resolves when completed
+3. **Monetag Rewarded Popup**: Opens advertiser page in new context
 
 ## Data Models
 
@@ -229,8 +246,12 @@ Admins can access the Admin panel (`/admin`) to:
 
 ### AppSettings
 
-- `adWatchThreshold`, `adsterraUrl`
-- `adDetectionGracePeriod`, `hideTimerUI`
+- `adWatchThreshold`, `adDetectionGracePeriod`, `hideTimerUI`
+- `primaryAdType` - 'direct_link' | 'monetag_rewarded_interstitial' | 'monetag_rewarded_popup'
+- `directLinkUrl` - URL for direct link ad type
+- `monetagZoneId`, `monetagYmid`, `monetagRequestVar`, `monetagPreloadEnabled`, `monetagTimeout`
+- `monetagInApp` - In-App Interstitial settings (enabled, frequency, capping, interval, timeout, everyPage)
+- `adsterraUrl` - Legacy field (mapped to directLinkUrl for backward compatibility)
 
 ## License
 

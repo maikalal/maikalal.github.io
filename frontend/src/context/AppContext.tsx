@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { useSignal, initData, miniApp } from '@tma.js/sdk-react';
 import { signInAnonymously } from 'firebase/auth';
 import { parseTelegramUser } from '@/firebase/auth';
@@ -14,8 +14,17 @@ import {
   incrementAdsWatched,
   unlockItem,
   createUser,
+  updateUserFirebaseUid,
+  createAuthMapping,
 } from '@/firebase/firestore';
 import type { User, Unlockable, UserUnlockable, UserFavorite, AppSettings } from '@/types';
+import {
+  initMonetag,
+  initInAppInterstitial,
+  resetInAppInterstitial,
+  resetMonetag,
+  isMonetagInitialized,
+} from '@/services/monetag';
 
 interface AppContextType {
   user: User | null;
@@ -49,6 +58,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [userUnlockables, setUserUnlockables] = useState<UserUnlockable[]>([]);
   const [favorites, setFavorites] = useState<UserFavorite[]>([]);
   const [settings, setSettings] = useState<AppSettings | null>(null);
+  const prevInAppEnabledRef = useRef<boolean>(false);
 
   // Derived state
   const favoriteIds = new Set(favorites.map(f => f.unlockableId));
@@ -65,6 +75,35 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const unsubscribe = subscribeToSettings(setSettings);
     return unsubscribe;
   }, []);
+
+  // Initialize Monetag SDK when settings are loaded
+  useEffect(() => {
+    if (!settings) return;
+
+    const zoneId = settings.monetagZoneId;
+    const inAppEnabled = settings.monetagInApp?.enabled ?? false;
+    const needsSdk = settings.primaryAdType !== 'direct_link' || inAppEnabled;
+
+    // Detect when in-app interstitial is disabled (was enabled, now disabled)
+    if (prevInAppEnabledRef.current && !inAppEnabled) {
+      resetInAppInterstitial();
+      console.log('[Monetag] In-App Interstitial disabled');
+    }
+    prevInAppEnabledRef.current = inAppEnabled;
+
+    // Reset and reinitialize if zone ID changed and SDK is needed
+    if (zoneId && needsSdk) {
+      if (isMonetagInitialized()) {
+        resetMonetag();
+      }
+      initMonetag(zoneId);
+
+      // Initialize In-App Interstitial if enabled
+      if (inAppEnabled && settings.monetagInApp) {
+        initInAppInterstitial(settings.monetagInApp);
+      }
+    }
+  }, [settings?.monetagZoneId, settings?.primaryAdType, settings?.monetagInApp?.enabled]);
 
   // Initialize user
   useEffect(() => {
@@ -94,6 +133,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               firebaseUid,
             });
           }
+
+          // Create auth mapping for security rules
+          await createAuthMapping(firebaseUid, 123456789);
+
           setUser(mockUser);
           setLoading(false);
           return;
@@ -121,7 +164,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             role: 'user',
             firebaseUid,
           });
+        } else if (existingUser.firebaseUid !== firebaseUid) {
+          // Update firebaseUid if it changed (new anonymous session)
+          await updateUserFirebaseUid(telegramUser.id, firebaseUid);
+          existingUser = { ...existingUser, firebaseUid };
         }
+
+        // Create auth mapping for security rules
+        await createAuthMapping(firebaseUid, telegramUser.id);
 
         setUser(existingUser);
 
