@@ -1,35 +1,60 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Users collection - allow authenticated access
-    match /users/{userId} {
-      allow read, write: if request.auth != null;
+
+    function signedIn() {
+      return request.auth != null;
     }
-    
+
+    function hasMapping() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/auth_mappings/$(request.auth.uid));
+    }
+
+    function mappedTelegramId() {
+      return get(/databases/$(database)/documents/auth_mappings/$(request.auth.uid)).data.telegramId;
+    }
+
+    function isAdmin() {
+      return hasMapping()
+        && exists(/databases/$(database)/documents/users/$(mappedTelegramId()))
+        && get(/databases/$(database)/documents/users/$(mappedTelegramId())).data.role == 'admin';
+    }
+
+    // Auth mappings - maps firebaseUid to telegramId for security rules
+    match /auth_mappings/{firebaseUid} {
+      allow read, write: if signedIn() && request.auth.uid == firebaseUid;
+    }
+
+    // Users collection - document ID is telegramId
+    match /users/{telegramId} {
+      allow read: if signedIn();
+      allow create, update, delete: if signedIn() && (
+        (hasMapping() && mappedTelegramId() == telegramId)
+        || isAdmin()
+      );
+    }
+
     // Unlockables - public read, admin write only
     match /unlockables/{unlockableId} {
       allow read: if true;
-      allow write: if request.auth != null && 
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      allow write: if isAdmin();
     }
-    
+
     // User unlockables - allow authenticated users
     match /user_unlockables/{docId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if signedIn();
     }
-    
+
     // User favorites - allow authenticated users
     match /user_favorites/{docId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if signedIn();
     }
-    
+
     // Settings - admin write, authenticated read
     match /settings/{settingId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && 
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      allow read: if signedIn();
+      allow write: if isAdmin();
     }
   }
 }
