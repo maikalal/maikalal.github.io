@@ -17,6 +17,7 @@ import {
   onSnapshot,
   addDoc,
   getCountFromServer,
+  increment,
 } from 'firebase/firestore';
 import { db } from './config';
 import type { User, Unlockable, UserUnlockable, UserFavorite, AppSettings, AdminStats, SupportedLanguage } from '@/types';
@@ -272,34 +273,24 @@ export async function unlockItem(userId: string, unlockableId: string): Promise<
 // Increment unlock counter on an unlockable
 export async function incrementUnlockCount(unlockableId: string): Promise<void> {
   const docRef = doc(db, UNLOCKABLES_COLLECTION, unlockableId);
-  const snapshot = await getDoc(docRef);
-  
-  if (snapshot.exists()) {
-    const currentCount = snapshot.data().unlockCount || 0;
-    await updateDoc(docRef, { unlockCount: currentCount + 1 });
-  }
+  // Use atomic increment to avoid race conditions
+  await updateDoc(docRef, { unlockCount: increment(1) });
 }
 
 // Increment favorite counter on an unlockable
 export async function incrementFavoriteCount(unlockableId: string): Promise<void> {
   const docRef = doc(db, UNLOCKABLES_COLLECTION, unlockableId);
-  const snapshot = await getDoc(docRef);
-  
-  if (snapshot.exists()) {
-    const currentCount = snapshot.data().favoriteCount || 0;
-    await updateDoc(docRef, { favoriteCount: currentCount + 1 });
-  }
+  // Use atomic increment to avoid race conditions
+  await updateDoc(docRef, { favoriteCount: increment(1) });
 }
 
 // Decrement favorite counter on an unlockable
 export async function decrementFavoriteCount(unlockableId: string): Promise<void> {
   const docRef = doc(db, UNLOCKABLES_COLLECTION, unlockableId);
-  const snapshot = await getDoc(docRef);
-  
-  if (snapshot.exists()) {
-    const currentCount = snapshot.data().favoriteCount || 0;
-    await updateDoc(docRef, { favoriteCount: Math.max(0, currentCount - 1) });
-  }
+  // Use atomic increment(-1) to avoid race conditions
+  // Note: Firestore allows negative values, but we rely on security rules
+  // to prevent decrementing below 0 (rule requires +/- 1 change)
+  await updateDoc(docRef, { favoriteCount: increment(-1) });
 }
 
 // User Favorites Operations
