@@ -86,10 +86,26 @@ service cloud.firestore {
       allow list, get: if isAdmin();
     }
 
-    // Unlockables - public read, admin write only
+    // Unlockables - public read, admin write only, users can update counters
     match /unlockables/{unlockableId} {
       allow read: if true;
       allow write: if isAdmin();
+      // Allow authenticated users to update counters (for popularity tracking)
+      allow update: if signedIn() 
+        && request.resource.data.keys().hasOnly(['unlockCount', 'favoriteCount'])
+        && (
+          // unlockCount: increment by 1, or set to 1 if not exists
+          (!('unlockCount' in request.resource.data) || 
+           ('unlockCount' in resource.data && request.resource.data.unlockCount == resource.data.unlockCount + 1) ||
+           (!('unlockCount' in resource.data) && request.resource.data.unlockCount == 1))
+          // favoriteCount: increment/decrement by 1, or set to 1/0 if not exists
+          && (!('favoriteCount' in request.resource.data) ||
+              ('favoriteCount' in resource.data && (
+                request.resource.data.favoriteCount == resource.data.favoriteCount + 1 ||
+                request.resource.data.favoriteCount == resource.data.favoriteCount - 1
+              )) ||
+              (!('favoriteCount' in resource.data) && request.resource.data.favoriteCount <= 1))
+        );
     }
 
     // Settings - admin write, authenticated read

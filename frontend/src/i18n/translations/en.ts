@@ -34,6 +34,7 @@ export const en: Record<TranslationKey, string> = {
   'stats.totalUnlocked': 'Total Unlocked',
   'stats.adsWatched': 'ads',
   'stats.itemsUnlocked': 'unlocked',
+  'stats.unlockedBy': 'unlocked by',
   
   // Search
   'search.placeholder': 'Search...',

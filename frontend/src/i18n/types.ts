@@ -33,6 +33,7 @@ export type TranslationKey =
   | 'stats.totalUnlocked'
   | 'stats.adsWatched'
   | 'stats.itemsUnlocked'
+  | 'stats.unlockedBy'
   
   // Search
   | 'search.placeholder'

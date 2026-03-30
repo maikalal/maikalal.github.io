@@ -34,6 +34,7 @@ export const bn: Record<TranslationKey, string> = {
   'stats.totalUnlocked': 'মোট আনলক',
   'stats.adsWatched': 'টি বিজ্ঞাপন',
   'stats.itemsUnlocked': 'টি আনলক',
+  'stats.unlockedBy': 'জন আনলক করেছে',
   
   // Search
   'search.placeholder': 'খুঁজুন...',

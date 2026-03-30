@@ -69,6 +69,13 @@ export default function UnlockableCard({ unlockable, onUnlock }: UnlockableCardP
             {t('stats.unlocked')}
           </div>
         )}
+
+        {/* Unlocked by count badge */}
+        {unlockable.unlockCount !== undefined && unlockable.unlockCount > 0 && !unlocked && (
+          <div className="absolute bottom-2 left-2 badge badge-ghost badge-sm text-xs">
+            {unlockable.unlockCount} {t('stats.unlockedBy')}
+          </div>
+        )}
       </figure>
 
       <div className="card-body p-3">

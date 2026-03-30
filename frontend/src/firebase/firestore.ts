@@ -264,6 +264,42 @@ export async function unlockItem(userId: string, unlockableId: string): Promise<
     unlocked: true,
     unlockedAt: Timestamp.now(),
   });
+  
+  // Increment unlock counter on the unlockable
+  await incrementUnlockCount(unlockableId);
+}
+
+// Increment unlock counter on an unlockable
+export async function incrementUnlockCount(unlockableId: string): Promise<void> {
+  const docRef = doc(db, UNLOCKABLES_COLLECTION, unlockableId);
+  const snapshot = await getDoc(docRef);
+  
+  if (snapshot.exists()) {
+    const currentCount = snapshot.data().unlockCount || 0;
+    await updateDoc(docRef, { unlockCount: currentCount + 1 });
+  }
+}
+
+// Increment favorite counter on an unlockable
+export async function incrementFavoriteCount(unlockableId: string): Promise<void> {
+  const docRef = doc(db, UNLOCKABLES_COLLECTION, unlockableId);
+  const snapshot = await getDoc(docRef);
+  
+  if (snapshot.exists()) {
+    const currentCount = snapshot.data().favoriteCount || 0;
+    await updateDoc(docRef, { favoriteCount: currentCount + 1 });
+  }
+}
+
+// Decrement favorite counter on an unlockable
+export async function decrementFavoriteCount(unlockableId: string): Promise<void> {
+  const docRef = doc(db, UNLOCKABLES_COLLECTION, unlockableId);
+  const snapshot = await getDoc(docRef);
+  
+  if (snapshot.exists()) {
+    const currentCount = snapshot.data().favoriteCount || 0;
+    await updateDoc(docRef, { favoriteCount: Math.max(0, currentCount - 1) });
+  }
 }
 
 // User Favorites Operations
@@ -275,6 +311,9 @@ export async function addFavorite(userId: string, unlockableId: string): Promise
     addedAt: now,
   });
   
+  // Increment favorite counter on the unlockable
+  await incrementFavoriteCount(unlockableId);
+  
   return {
     id: unlockableId,
     unlockableId,
@@ -285,6 +324,9 @@ export async function addFavorite(userId: string, unlockableId: string): Promise
 export async function removeFavorite(userId: string, unlockableId: string): Promise<void> {
   const docRef = doc(db, USERS_COLLECTION, userId, 'favorites', unlockableId);
   await deleteDoc(docRef);
+  
+  // Decrement favorite counter on the unlockable
+  await decrementFavoriteCount(unlockableId);
 }
 
 export async function getUserFavorites(userId: string): Promise<UserFavorite[]> {

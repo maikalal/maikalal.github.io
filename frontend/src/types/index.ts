@@ -20,6 +20,8 @@ export interface Unlockable {
   thumbnail?: string;
   adsRequired: number;
   archived?: boolean;
+  unlockCount?: number;    // Number of users who unlocked this item
+  favoriteCount?: number;  // Number of users who favorited this item
   createdAt: Date;
   createdBy: string;
 }
