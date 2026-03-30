@@ -120,6 +120,7 @@ export async function showRewardedInterstitial(options: {
       type: 'end',
       ymid: options.ymid,
       requestVar: options.requestVar,
+      timeout: options.timeout || 5,
       catchIfNoFeed: options.catchIfNoFeed ?? true,
     }) as { reward_event_type?: string; estimated_price?: number } | undefined;
 
