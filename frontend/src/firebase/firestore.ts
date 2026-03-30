@@ -131,10 +131,20 @@ export async function createUnlockable(unlockable: Omit<Unlockable, 'id' | 'crea
   const colRef = collection(db, UNLOCKABLES_COLLECTION);
   const now = Timestamp.now();
   
-  const docRef = await addDoc(colRef, {
-    ...unlockable,
+  // Filter out undefined values to prevent Firestore errors
+  const filteredData = {
+    title: unlockable.title,
+    type: unlockable.type,
+    content: unlockable.content,
+    adsRequired: unlockable.adsRequired,
+    createdBy: unlockable.createdBy,
+    ...(unlockable.description && { description: unlockable.description }),
+    ...(unlockable.thumbnail && { thumbnail: unlockable.thumbnail }),
+    ...(unlockable.archived && { archived: unlockable.archived }),
     createdAt: now,
-  });
+  };
+  
+  const docRef = await addDoc(colRef, filteredData);
   
   return {
     ...unlockable,
@@ -170,7 +180,16 @@ export async function getUnlockableById(id: string): Promise<Unlockable | null> 
 
 export async function updateUnlockable(id: string, data: Partial<Unlockable>): Promise<void> {
   const docRef = doc(db, UNLOCKABLES_COLLECTION, id);
-  await updateDoc(docRef, data);
+  
+  // Filter out undefined values to prevent Firestore errors
+  const filteredData: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (value !== undefined) {
+      filteredData[key] = value;
+    }
+  }
+  
+  await updateDoc(docRef, filteredData);
 }
 
 export async function deleteUnlockable(id: string): Promise<void> {
