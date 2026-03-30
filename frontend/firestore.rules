@@ -1,0 +1,101 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function hasMapping() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/auth_mappings/$(request.auth.uid));
+    }
+
+    function mappedTelegramId() {
+      return get(/databases/$(database)/documents/auth_mappings/$(request.auth.uid)).data.telegramId;
+    }
+
+    function isAdmin() {
+      return hasMapping()
+        && exists(/databases/$(database)/documents/users/$(mappedTelegramId()))
+        && get(/databases/$(database)/documents/users/$(mappedTelegramId())).data.role == 'admin';
+    }
+
+    // Auth mappings - maps firebaseUid to telegramId for security rules
+    match /auth_mappings/{firebaseUid} {
+      allow read, write: if signedIn() && request.auth.uid == firebaseUid;
+    }
+
+    // Users collection - document ID is telegramId (string)
+    // Non-admins cannot set or modify the 'role' field
+    match /users/{telegramId} {
+      // Users can read own data, admins can read all
+      allow get: if signedIn() && (string(mappedTelegramId()) == telegramId || isAdmin());
+      allow list: if isAdmin();
+      allow create: if hasMapping() 
+        && string(mappedTelegramId()) == telegramId
+        // Normal case: role must be 'user' or not specified
+        && (!('role' in request.resource.data) || request.resource.data.role == 'user');
+      allow update: if (hasMapping() 
+        && string(mappedTelegramId()) == telegramId
+        // Allow update only if role is unchanged or not present
+        && (!('role' in request.resource.data) 
+            || request.resource.data.role == resource.data.role))
+        || isAdmin();
+      allow delete: if isAdmin();
+
+      // User unlockables subcollection - users can only access their own
+      match /unlockables/{unlockableId} {
+        allow get, list: if hasMapping() && string(mappedTelegramId()) == telegramId;
+        allow create: if hasMapping() && string(mappedTelegramId()) == telegramId
+          && request.resource.data.adsWatched == 1
+          && request.resource.data.unlocked == false
+          && 'adsRequired' in request.resource.data
+          // Validate unlockable exists and adsRequired matches
+          && exists(/databases/$(database)/documents/unlockables/$(unlockableId))
+          && request.resource.data.adsRequired == get(/databases/$(database)/documents/unlockables/$(unlockableId)).data.adsRequired;
+        allow update: if hasMapping() && string(mappedTelegramId()) == telegramId
+          && (
+            // Allow incrementing adsWatched by exactly 1, no other changes
+            (request.resource.data.adsWatched == resource.data.adsWatched + 1
+             && request.resource.data.unlocked == resource.data.unlocked
+             && !('unlockedAt' in request.resource.data))
+            ||
+            // Allow setting unlocked=true only if adsWatched >= adsRequired
+            (request.resource.data.unlocked == true
+             && resource.data.unlocked == false
+             && resource.data.adsWatched >= resource.data.adsRequired
+             && request.resource.data.adsWatched == resource.data.adsWatched
+             && 'unlockedAt' in request.resource.data)
+          );
+        allow delete: if isAdmin();
+      }
+
+      // User favorites subcollection - users can only access their own
+      match /favorites/{unlockableId} {
+        allow get, list, create, delete: if hasMapping() 
+          && string(mappedTelegramId()) == telegramId;
+      }
+    }
+
+    // Collection group rules for admin analytics
+    match /{path=**}/unlockables/{unlockableId} {
+      allow list, get: if isAdmin();
+    }
+    match /{path=**}/favorites/{unlockableId} {
+      allow list, get: if isAdmin();
+    }
+
+    // Unlockables - public read, admin write only
+    match /unlockables/{unlockableId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Settings - admin write, authenticated read
+    match /settings/{settingId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+  }
+}
