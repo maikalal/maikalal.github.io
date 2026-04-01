@@ -111,14 +111,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       try {
         setLoading(true);
 
-        // Sign in to Firebase anonymously first
-        const credential = await signInAnonymously(auth);
-        const firebaseUid = credential.user.uid;
-
         // In development or outside Telegram, use mock user
         const isDev = import.meta.env.DEV || !initDataRaw;
 
         if (isDev) {
+          // Sign in to Firebase anonymously for dev mode
+          const credential = await signInAnonymously(auth);
+          const firebaseUid = credential.user.uid;
+
           // Create auth mapping FIRST (required for security rules)
           await createAuthMapping(firebaseUid, 123456789);
 
@@ -143,14 +143,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        // Parse Telegram user from init data
+        // Parse Telegram user from init data FIRST (before creating Firebase Auth user)
         const telegramUser = parseTelegramUser(initDataRaw || '');
 
         if (!telegramUser) {
+          // Return early WITHOUT creating Firebase Auth user to avoid orphan accounts
           setError('Could not get Telegram user data');
           setLoading(false);
           return;
         }
+
+        // NOW sign in to Firebase anonymously - only after we have valid Telegram user data
+        const credential = await signInAnonymously(auth);
+        const firebaseUid = credential.user.uid;
 
         // Create auth mapping FIRST (required for security rules to allow user creation)
         await createAuthMapping(firebaseUid, telegramUser.id);
@@ -178,6 +183,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       } catch (err) {
         console.error('Error initializing user:', err);
+        // Clean up orphaned Firebase Auth user if creation failed
+        if (auth.currentUser) {
+          try {
+            await auth.currentUser.delete();
+            console.log('[Auth] Cleaned up orphaned anonymous user');
+          } catch (deleteErr) {
+            console.error('[Auth] Failed to clean up orphaned user:', deleteErr);
+          }
+        }
         setError(err instanceof Error ? err.message : 'Failed to initialize');
       } finally {
         setLoading(false);
