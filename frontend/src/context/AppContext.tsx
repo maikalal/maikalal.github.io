@@ -76,7 +76,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return unsubscribe;
   }, []);
 
-  // Initialize Monetag SDK when settings are loaded
+  // Initialize Monetag SDK when settings are loaded (for primary ad type)
   useEffect(() => {
     if (!settings) return;
 
@@ -84,26 +84,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const inAppEnabled = settings.monetagInApp?.enabled ?? false;
     const needsSdk = settings.primaryAdType !== 'direct_link' || inAppEnabled;
 
-    // Detect when in-app interstitial is disabled (was enabled, now disabled)
+    // Detect when in-app interstitial is disabled
     if (prevInAppEnabledRef.current && !inAppEnabled) {
       resetInAppInterstitial();
       console.log('[Monetag] In-App Interstitial disabled');
     }
     prevInAppEnabledRef.current = inAppEnabled;
 
-    // Reset and reinitialize if zone ID changed and SDK is needed
+    // Reset and reinitialize SDK if zone ID changed
     if (zoneId && needsSdk) {
       if (isMonetagInitialized()) {
         resetMonetag();
       }
       initMonetag(zoneId);
-
-      // Initialize In-App Interstitial if enabled
-      if (inAppEnabled && settings.monetagInApp) {
-        initInAppInterstitial(settings.monetagInApp);
-      }
+      // NOTE: In-app interstitial initialized separately after content loads
     }
   }, [settings?.monetagZoneId, settings?.primaryAdType, settings?.monetagInApp?.enabled]);
+
+  // Initialize In-App Interstitial AFTER content loads (not during loading spinner)
+  useEffect(() => {
+    if (loading) return; // Wait until content is ready
+    if (!settings?.monetagInApp?.enabled) return;
+    if (!settings?.monetagZoneId) return;
+    if (!isMonetagInitialized()) return;
+
+    initInAppInterstitial(settings.monetagInApp);
+  }, [loading, settings?.monetagInApp, settings?.monetagZoneId]);
 
   // Initialize user
   useEffect(() => {
