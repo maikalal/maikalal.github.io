@@ -100,14 +100,22 @@ The worker will be available at `http://localhost:8787`.
 
 ```jsonc
 {
+  "$schema": "node_modules/wrangler/config-schema.json",
   "name": "r2-worker",
   "main": "src/index.ts",
+  "compatibility_date": "2026-03-17",
+  "observability": {
+    "enabled": true
+  },
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   "r2_buckets": [
     {
       "binding": "BUCKET",
-      "bucket_name": "unlockables-bucket",
-    },
-  ],
+      "bucket_name": "unlockables-bucket"
+    }
+  ]
 }
 ```
 

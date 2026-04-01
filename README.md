@@ -29,11 +29,12 @@ This project consists of two components:
 
 ## Features
 
-- **Content Unlocking**: Users watch Adsterra ads to unlock pictures/links
+- **Content Unlocking**: Users watch Monetag ads to unlock pictures/links
 - **Progress Tracking**: Track ad watching progress per item
 - **Favorites**: Save favorite items for quick access
 - **Admin Panel**: Manage unlockables, users, and settings
 - **Telegram Auth**: Seamless authentication via Telegram Mini App
+- **Multi-language**: English and Bengali localization with auto-detection
 
 ## Quick Start
 
@@ -77,7 +78,7 @@ See [frontend/README.md](./frontend/README.md) for detailed setup.
 | Storage  | Cloudflare R2                                    |
 | Runtime  | Cloudflare Workers (Hono)                        |
 | Auth     | Telegram Mini App SDK                            |
-| Ads      | Adsterra                                         |
+| Ads      | Monetag SDK                                      |
 
 ## Project Structure
 
@@ -89,6 +90,9 @@ tap/
 │   │   ├── pages/      # Page components
 │   │   ├── firebase/   # Firebase integration
 │   │   ├── helpers/    # Utilities
+│   │   ├── i18n/       # Internationalization
+│   │   ├── services/   # External service integrations
+│   │   ├── css/        # Additional styles
 │   │   └── types/      # TypeScript types
 │   └── README.md
 ├── r2-worker/          # File storage service

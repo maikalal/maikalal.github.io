@@ -11,6 +11,9 @@ A Telegram Mini App where users watch ads to unlock pictures/links. Built with R
 - **Content Unlocking**: Unlock pictures or links after watching required ads
 - **Admin Panel**: Full management dashboard for admins
 - **Telegram Auth**: Seamless authentication via Telegram Mini App
+- **TON Connect**: Wallet connection for TON blockchain
+- **Multi-language**: English and Bengali localization with auto-detection
+- **Maintenance Mode**: Admin-controlled maintenance overlay
 
 ## Tech Stack
 
@@ -153,7 +156,7 @@ src/
 │   ├── Layout.tsx       # Main layout wrapper
 │   ├── SearchBar.tsx    # Search input
 │   ├── UnlockableCard.tsx
-│   └── UnlockableDetailModal.tsx
+│   └── UnlockableList.tsx
 ├── context/             # React context for global state
 │   └── AppContext.tsx
 ├── firebase/            # Firebase configuration and services
@@ -161,7 +164,12 @@ src/
 │   ├── config.ts
 │   └── firestore.ts
 ├── helpers/             # Utility functions
+│   ├── publicUrl.ts     # Public URL helper
 │   └── upload.ts        # R2 file upload
+├── i18n/                # Internationalization
+│   ├── constants.ts     # Language mappings
+│   ├── index.ts         # i18n setup
+│   └── translations/    # Language files (en, bn)
 ├── navigation/          # Routing configuration
 │   └── routes.tsx
 ├── pages/               # Page components
@@ -174,8 +182,13 @@ src/
 │   ├── AllPage.tsx
 │   ├── FavoritesPage.tsx
 │   ├── ProfilePage.tsx
+│   ├── TONConnectPage/   # TON wallet connection
 │   ├── UnlockableDetailPage.tsx
 │   └── UnlockedPage.tsx
+├── services/            # External service integrations
+│   ├── geolocation.ts   # IP-based location detection
+│   └── monetag.ts       # Monetag SDK integration
+├── css/                 # Additional styles
 └── types/               # TypeScript type definitions
     └── index.ts
 ```
@@ -220,6 +233,15 @@ Admins can access the Admin panel (`/admin`) to:
 | Interval                  | Seconds between ads                          |
 | Initial Delay             | Delay before first ad                        |
 | Reset on Page Nav         | Reset session on page navigation             |
+| **Maintenance Mode**      |                                              |
+| Enable                    | Toggle maintenance mode overlay              |
+| Message                   | Custom message to display                    |
+| Allow Admins              | Let admins bypass maintenance mode           |
+| **Language Settings**     |                                              |
+| Default Language          | Fallback language (en/bn)                    |
+| Auto Detect               | Detect language from Telegram                |
+| Force Language            | Admin-forced language override              |
+| IP Detection              | Detect language via geolocation             |
 
 ### Primary Ad Types
 
@@ -234,15 +256,21 @@ Admins can access the Admin panel (`/admin`) to:
 - `title`, `description`, `type` (picture/link)
 - `content[]` - Array of image URLs or single link
 - `thumbnail`, `adsRequired`, `archived`
+- `unlockCount` - Number of users who unlocked this item
+- `favoriteCount` - Number of users who favorited this item
+- `createdBy` - User ID of creator
 
 ### User
 
 - `telegramId`, `firstName`, `lastName`, `username`
 - `photoUrl`, `role` (user/admin)
+- `firebaseUid` - Firebase authentication UID
+- `preferredLanguage` - User's language preference (en/bn)
 
 ### UserUnlockable
 
-- `userId`, `unlockableId`, `adsWatched`, `unlocked`
+- `unlockableId`, `adsRequired`, `adsWatched`, `unlocked`
+- `unlockedAt` - Timestamp when unlocked
 
 ### AppSettings
 
@@ -251,6 +279,8 @@ Admins can access the Admin panel (`/admin`) to:
 - `directLinkUrl` - URL for direct link ad type
 - `monetagZoneId`, `monetagYmid`, `monetagRequestVar`, `monetagPreloadEnabled`, `monetagTimeout`
 - `monetagInApp` - In-App Interstitial settings (enabled, frequency, capping, interval, timeout, everyPage)
+- `maintenanceMode`, `maintenanceMessage`, `maintenanceAllowAdmins` - Maintenance mode control
+- `languageSettings` - Language configuration (defaultLanguage, autoDetectLanguage, supportedLanguages, forceLanguage, enableIpDetection)
 - `adsterraUrl` - Legacy field (mapped to directLinkUrl for backward compatibility)
 
 ## License
